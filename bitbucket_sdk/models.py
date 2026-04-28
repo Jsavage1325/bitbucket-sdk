@@ -219,7 +219,7 @@ class Comment:
             updated_on=_parse_dt(data.get("updated_on")),
             inline=Inline.from_dict(inline_data) if inline_data else None,
             deleted=data.get("deleted", False),
-            resolved=data.get("resolved", False),
+            resolved=data.get("resolution") is not None,
         )
 
     @property

@@ -40,7 +40,7 @@ _COMMENT_DATA = {
     "created_on": "2024-01-15T12:00:00.000000+00:00",
     "updated_on": "2024-01-15T12:00:00.000000+00:00",
     "deleted": False,
-    "resolved": False,
+    "resolution": None,
 }
 
 _INLINE_COMMENT_DATA = {
@@ -48,13 +48,13 @@ _INLINE_COMMENT_DATA = {
     "id": 100,
     "content": {"raw": "This line looks wrong", "markup": "markdown", "html": "<p>This line looks wrong</p>"},
     "inline": {"path": "src/auth.py", "to": 42},
-    "resolved": False,
+    "resolution": None,
 }
 
 _RESOLVED_COMMENT_DATA = {
     **_COMMENT_DATA,
     "id": 101,
-    "resolved": True,
+    "resolution": {"type": "resolved"},
 }
 
 _PR_PAGE = {
