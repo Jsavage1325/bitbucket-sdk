@@ -21,6 +21,7 @@ Public surface:
 """
 
 from ._version import __version__
+from .auth import AccessTokenAuth, APITokenAuth
 from .client import BitbucketClient
 from .exceptions import (
     APIError,
@@ -47,6 +48,9 @@ from .models import (
 __all__ = [
     # Version
     "__version__",
+    # Auth providers (for advanced use — most users only need BitbucketClient)
+    "APITokenAuth",
+    "AccessTokenAuth",
     # Client
     "BitbucketClient",
     # Exceptions

@@ -341,5 +341,108 @@ class TestInputValidation(unittest.TestCase):
             resource.get_commit_diff("ws", "repo", "")
 
 
+# ---------------------------------------------------------------------------
+# Authentication providers
+# ---------------------------------------------------------------------------
+
+
+class TestAPITokenAuth(unittest.TestCase):
+
+    def test_raises_if_email_missing(self):
+        from bitbucket_sdk.auth import APITokenAuth
+        with self.assertRaises(ValueError) as ctx:
+            APITokenAuth(email=None, api_token="token")
+        self.assertIn("email", str(ctx.exception).lower())
+
+    def test_raises_if_token_missing(self):
+        from bitbucket_sdk.auth import APITokenAuth
+        with self.assertRaises(ValueError) as ctx:
+            APITokenAuth(email="me@example.com", api_token=None)
+        self.assertIn("api token", str(ctx.exception).lower())
+
+    def test_reads_credentials_from_env(self):
+        from bitbucket_sdk.auth import APITokenAuth
+        import os
+        env = {"BITBUCKET_EMAIL": "env@example.com", "BITBUCKET_API_TOKEN": "envtoken"}
+        with patch.dict(os.environ, env):
+            auth = APITokenAuth()
+        self.assertIsNotNone(auth)
+
+    def test_sets_basic_auth_header(self):
+        from bitbucket_sdk.auth import APITokenAuth
+        import base64, requests as req_lib
+        auth = APITokenAuth(email="me@example.com", api_token="mytoken")
+        prepared = req_lib.Request("GET", "https://example.com").prepare()
+        auth(prepared)
+        expected = "Basic " + base64.b64encode(b"me@example.com:mytoken").decode()
+        self.assertEqual(prepared.headers.get("Authorization"), expected)
+
+
+class TestAccessTokenAuth(unittest.TestCase):
+
+    def test_raises_if_token_missing(self):
+        from bitbucket_sdk.auth import AccessTokenAuth
+        with self.assertRaises(ValueError) as ctx:
+            AccessTokenAuth(access_token=None)
+        self.assertIn("access token", str(ctx.exception).lower())
+
+    def test_reads_token_from_env(self):
+        from bitbucket_sdk.auth import AccessTokenAuth
+        import os
+        with patch.dict(os.environ, {"BITBUCKET_ACCESS_TOKEN": "myoauthtoken"}):
+            auth = AccessTokenAuth()
+        self.assertIsNotNone(auth)
+
+    def test_sets_bearer_header(self):
+        from bitbucket_sdk.auth import AccessTokenAuth
+        import requests as req_lib
+        auth = AccessTokenAuth(access_token="mytoken123")
+        prepared = req_lib.Request("GET", "https://example.com").prepare()
+        auth(prepared)
+        self.assertEqual(prepared.headers["Authorization"], "Bearer mytoken123")
+
+    def test_explicit_token_overrides_env(self):
+        from bitbucket_sdk.auth import AccessTokenAuth
+        import os, requests as req_lib
+        with patch.dict(os.environ, {"BITBUCKET_ACCESS_TOKEN": "envtoken"}):
+            auth = AccessTokenAuth(access_token="explicit")
+        prepared = req_lib.Request("GET", "https://example.com").prepare()
+        auth(prepared)
+        self.assertEqual(prepared.headers["Authorization"], "Bearer explicit")
+
+
+class TestBitbucketClientAuthSelection(unittest.TestCase):
+    """BitbucketClient should choose the right auth provider based on arguments."""
+
+    def test_uses_access_token_auth_when_access_token_provided(self):
+        from bitbucket_sdk import BitbucketClient
+        from bitbucket_sdk.auth import AccessTokenAuth
+        client = BitbucketClient(access_token="mytoken")
+        self.assertIsInstance(client._http._session.auth, AccessTokenAuth)
+
+    def test_uses_access_token_auth_from_env(self):
+        from bitbucket_sdk import BitbucketClient
+        from bitbucket_sdk.auth import AccessTokenAuth
+        import os
+        with patch.dict(os.environ, {"BITBUCKET_ACCESS_TOKEN": "envtoken"}, clear=False):
+            client = BitbucketClient()
+        self.assertIsInstance(client._http._session.auth, AccessTokenAuth)
+
+    def test_uses_api_token_auth_when_no_access_token(self):
+        from bitbucket_sdk import BitbucketClient
+        from bitbucket_sdk.auth import APITokenAuth
+        import os
+        env = {
+            "BITBUCKET_EMAIL": "me@example.com",
+            "BITBUCKET_API_TOKEN": "token",
+        }
+        # Ensure BITBUCKET_ACCESS_TOKEN is not set
+        clean_env = {k: v for k, v in os.environ.items() if k != "BITBUCKET_ACCESS_TOKEN"}
+        clean_env.update(env)
+        with patch.dict(os.environ, clean_env, clear=True):
+            client = BitbucketClient()
+        self.assertIsInstance(client._http._session.auth, APITokenAuth)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -426,6 +426,45 @@ class TestMerge(unittest.TestCase):
             json={"merge_strategy": "squash"},
         )
 
+    def test_merge_with_close_source_branch(self):
+        resource, http = _make_resource()
+        http.post.return_value = {**_PR_DATA, "state": "MERGED"}
+
+        resource.merge("ws", "repo", 42, close_source_branch=True)
+
+        payload = http.post.call_args.kwargs["json"]
+        self.assertTrue(payload["close_source_branch"])
+
+    def test_merge_with_message(self):
+        resource, http = _make_resource()
+        http.post.return_value = {**_PR_DATA, "state": "MERGED"}
+
+        resource.merge("ws", "repo", 42, message="Squashed feature branch")
+
+        payload = http.post.call_args.kwargs["json"]
+        self.assertEqual(payload["message"], "Squashed feature branch")
+
+    def test_merge_with_all_options(self):
+        resource, http = _make_resource()
+        http.post.return_value = {**_PR_DATA, "state": "MERGED"}
+
+        resource.merge("ws", "repo", 42, strategy="squash", close_source_branch=True, message="Done")
+
+        payload = http.post.call_args.kwargs["json"]
+        self.assertEqual(payload["merge_strategy"], "squash")
+        self.assertTrue(payload["close_source_branch"])
+        self.assertEqual(payload["message"], "Done")
+
+    def test_merge_omits_optional_fields_when_not_provided(self):
+        resource, http = _make_resource()
+        http.post.return_value = {**_PR_DATA, "state": "MERGED"}
+
+        resource.merge("ws", "repo", 42)
+
+        payload = http.post.call_args.kwargs["json"]
+        self.assertNotIn("close_source_branch", payload)
+        self.assertNotIn("message", payload)
+
     def test_merge_returns_pull_request(self):
         resource, http = _make_resource()
         http.post.return_value = {**_PR_DATA, "state": "MERGED"}
@@ -448,14 +487,11 @@ class TestCreate(unittest.TestCase):
 
         resource.create("ws", "repo", "My PR", "feature/x", "main")
 
-        http.post.assert_called_once_with(
-            "/repositories/ws/repo/pullrequests",
-            json={
-                "title": "My PR",
-                "source": {"branch": {"name": "feature/x"}},
-                "destination": {"branch": {"name": "main"}},
-            },
-        )
+        payload = http.post.call_args.kwargs["json"]
+        self.assertEqual(payload["title"], "My PR")
+        self.assertEqual(payload["source"]["branch"]["name"], "feature/x")
+        self.assertEqual(payload["destination"]["branch"]["name"], "main")
+        self.assertFalse(payload["close_source_branch"])
 
     def test_create_includes_description_when_provided(self):
         resource, http = _make_resource()
@@ -463,8 +499,38 @@ class TestCreate(unittest.TestCase):
 
         resource.create("ws", "repo", "My PR", "feature/x", "main", description="Fixes things")
 
-        call_kwargs = http.post.call_args.kwargs
-        self.assertEqual(call_kwargs["json"]["description"], "Fixes things")
+        payload = http.post.call_args.kwargs["json"]
+        self.assertEqual(payload["description"], "Fixes things")
+
+    def test_create_with_reviewers(self):
+        resource, http = _make_resource()
+        http.post.return_value = _PR_DATA
+
+        resource.create(
+            "ws", "repo", "My PR", "feature/x", "main",
+            reviewers=["{uuid-1}", "{uuid-2}"],
+        )
+
+        payload = http.post.call_args.kwargs["json"]
+        self.assertEqual(payload["reviewers"], [{"uuid": "{uuid-1}"}, {"uuid": "{uuid-2}"}])
+
+    def test_create_without_reviewers_omits_reviewers_field(self):
+        resource, http = _make_resource()
+        http.post.return_value = _PR_DATA
+
+        resource.create("ws", "repo", "My PR", "feature/x", "main")
+
+        payload = http.post.call_args.kwargs["json"]
+        self.assertNotIn("reviewers", payload)
+
+    def test_create_with_close_source_branch(self):
+        resource, http = _make_resource()
+        http.post.return_value = _PR_DATA
+
+        resource.create("ws", "repo", "My PR", "feature/x", "main", close_source_branch=True)
+
+        payload = http.post.call_args.kwargs["json"]
+        self.assertTrue(payload["close_source_branch"])
 
     def test_create_returns_pull_request(self):
         resource, http = _make_resource()

@@ -16,8 +16,8 @@ Methods:
   approve(workspace, repo, pr_id)               →  None
   unapprove(workspace, repo, pr_id)             →  None
   decline(workspace, repo, pr_id)               →  PullRequest
-  merge(workspace, repo, pr_id, strategy=...)   →  PullRequest
-  create(...)                                    →  PullRequest
+  merge(workspace, repo, pr_id, strategy=..., close_source_branch=None, message=None)  →  PullRequest
+  create(..., reviewers=None, close_source_branch=False)                               →  PullRequest
 """
 
 from __future__ import annotations
@@ -353,24 +353,37 @@ class PullRequestsResource:
         repo: str,
         pr_id: int,
         strategy: str = "merge_commit",
+        close_source_branch: Optional[bool] = None,
+        message: Optional[str] = None,
     ) -> PullRequest:
         """
         Merge a pull request.
 
         Args:
-            workspace: Bitbucket workspace slug.
-            repo:      Repository slug.
-            pr_id:     The PR number.
-            strategy:  ``"merge_commit"`` (default), ``"squash"``, or ``"fast_forward"``.
+            workspace:           Bitbucket workspace slug.
+            repo:                Repository slug.
+            pr_id:               The PR number.
+            strategy:            ``"merge_commit"`` (default), ``"squash"``,
+                                 or ``"fast_forward"``.
+            close_source_branch: If ``True``, delete the source branch after
+                                 merging. If ``None`` (default), the PR's own
+                                 setting is used.
+            message:             Custom merge commit message. Only used when
+                                 ``strategy="merge_commit"`` or ``"squash"``.
 
         Returns:
             PullRequest with state ``"MERGED"``.
         """
         _require("workspace", workspace)
         _require("repo", repo)
+        payload: dict = {"merge_strategy": strategy}
+        if close_source_branch is not None:
+            payload["close_source_branch"] = close_source_branch
+        if message is not None:
+            payload["message"] = message
         data = self._http.post(
             f"{_pr_path(workspace, repo, pr_id)}/merge",
-            json={"merge_strategy": strategy},
+            json=payload,
         )
         return PullRequest.from_dict(data)
 
@@ -386,17 +399,24 @@ class PullRequestsResource:
         source_branch: str,
         destination_branch: str,
         description: Optional[str] = None,
+        reviewers: Optional[List[str]] = None,
+        close_source_branch: bool = False,
     ) -> PullRequest:
         """
         Create a new pull request.
 
         Args:
-            workspace:          Bitbucket workspace slug.
-            repo:               Repository slug.
-            title:              PR title.
-            source_branch:      The branch containing the changes.
-            destination_branch: The branch to merge into.
-            description:        Optional PR description (Markdown supported).
+            workspace:           Bitbucket workspace slug.
+            repo:                Repository slug.
+            title:               PR title.
+            source_branch:       The branch containing the changes.
+            destination_branch:  The branch to merge into.
+            description:         Optional PR description (Markdown supported).
+            reviewers:           Optional list of reviewer UUIDs
+                                 (e.g. ``["{abc-123}", "{def-456}"]``).
+                                 UUIDs can be found via the Bitbucket UI or API.
+            close_source_branch: If ``True``, delete the source branch after
+                                 merging. Defaults to ``False``.
 
         Returns:
             The newly created PullRequest.
@@ -411,9 +431,12 @@ class PullRequestsResource:
             "title": title,
             "source": {"branch": {"name": source_branch}},
             "destination": {"branch": {"name": destination_branch}},
+            "close_source_branch": close_source_branch,
         }
         if description is not None:
             payload["description"] = description
+        if reviewers:
+            payload["reviewers"] = [{"uuid": uuid} for uuid in reviewers]
 
         data = self._http.post(_pr_base(workspace, repo), json=payload)
         return PullRequest.from_dict(data)

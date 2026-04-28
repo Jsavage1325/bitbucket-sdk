@@ -10,9 +10,9 @@ pip install -e .
 
 ## Authentication
 
-The SDK uses **Atlassian API tokens** with HTTP Basic Auth.
+Two authentication methods are supported.
 
-Set environment variables before running your script:
+### Option 1 — Atlassian API token (most common)
 
 ```bash
 export BITBUCKET_EMAIL="you@example.com"
@@ -21,11 +21,27 @@ export BITBUCKET_API_TOKEN="ATATxxxxxxxxxxxxxxx"
 
 Generate a token at: https://id.atlassian.com/manage-profile/security/api-tokens
 
-You can also pass credentials directly to the client:
+```python
+client = BitbucketClient()                                           # reads env vars
+client = BitbucketClient(email="you@example.com", api_token="...") # explicit
+```
+
+### Option 2 — OAuth 2.0 / workspace access token (Bearer Auth)
+
+Use this when you already hold an access token — e.g. from CI/CD, a Bitbucket
+workspace access token, or a completed OAuth flow.
+
+```bash
+export BITBUCKET_ACCESS_TOKEN="eyJxxxxxxxxxxxxxxx"
+```
 
 ```python
-client = BitbucketClient(email="you@example.com", api_token="ATATxxxxxx")
+client = BitbucketClient()                       # reads BITBUCKET_ACCESS_TOKEN from env
+client = BitbucketClient(access_token="eyJ...") # explicit
 ```
+
+**Auth resolution:** if `access_token` (or `BITBUCKET_ACCESS_TOKEN`) is present it
+takes precedence over API token credentials.
 
 ---
 
@@ -296,23 +312,26 @@ print(pr.state)  # "DECLINED"
 
 ---
 
-#### `merge(workspace, repo, pr_id, strategy="merge_commit")` → `PullRequest`
+#### `merge(workspace, repo, pr_id, strategy="merge_commit", close_source_branch=None, message=None)` → `PullRequest`
 
 Merge a PR.
 
 ```python
 pr = client.pull_requests.merge("myworkspace", "myrepo", 42)
 pr = client.pull_requests.merge("myworkspace", "myrepo", 42, strategy="squash")
+pr = client.pull_requests.merge("myworkspace", "myrepo", 42, close_source_branch=True, message="Done")
 print(pr.state)  # "MERGED"
 ```
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `strategy` | `str` | no | `"merge_commit"` (default), `"squash"`, `"fast_forward"` |
+| `close_source_branch` | `bool` | no | Delete source branch after merge. Defaults to the PR's own setting |
+| `message` | `str` | no | Custom merge commit message |
 
 ---
 
-#### `create(workspace, repo, title, source_branch, destination_branch, description=None)` → `PullRequest`
+#### `create(workspace, repo, title, source_branch, destination_branch, description=None, reviewers=None, close_source_branch=False)` → `PullRequest`
 
 Create a new pull request.
 
@@ -324,9 +343,20 @@ pr = client.pull_requests.create(
     source_branch="feature/login",
     destination_branch="main",
     description="Implements the login flow from the spec.",
+    reviewers=["{uuid-abc}", "{uuid-def}"],  # Bitbucket user UUIDs
+    close_source_branch=True,
 )
 print(pr.id, pr.title)
 ```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `title` | `str` | yes | PR title |
+| `source_branch` | `str` | yes | Branch containing the changes |
+| `destination_branch` | `str` | yes | Branch to merge into |
+| `description` | `str` | no | PR description (Markdown supported) |
+| `reviewers` | `list[str]` | no | List of reviewer UUIDs (find via Bitbucket UI or API) |
+| `close_source_branch` | `bool` | no | Delete source branch after merge (default `False`) |
 
 ---
 
