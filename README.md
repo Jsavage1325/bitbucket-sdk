@@ -5,6 +5,12 @@ Python SDK for the Bitbucket Cloud REST API v2.0.
 ## Installation
 
 ```bash
+pip install bitbucket-sdk
+```
+
+For development:
+
+```bash
 pip install -e .
 ```
 
