@@ -18,6 +18,8 @@ Methods:
   decline(workspace, repo, pr_id)               →  PullRequest
   merge(workspace, repo, pr_id, strategy=..., close_source_branch=None, message=None)  →  PullRequest
   create(..., reviewers=None, close_source_branch=False)                               →  PullRequest
+  update(workspace, repo, pr_id, title=None, description=None, reviewers=None,
+         destination_branch=None, close_source_branch=None)                            →  PullRequest
 """
 
 from __future__ import annotations
@@ -439,6 +441,70 @@ class PullRequestsResource:
             payload["reviewers"] = [{"uuid": uuid} for uuid in reviewers]
 
         data = self._http.post(_pr_base(workspace, repo), json=payload)
+        return PullRequest.from_dict(data)
+
+    # ------------------------------------------------------------------
+    # update
+    # ------------------------------------------------------------------
+
+    def update(
+        self,
+        workspace: str,
+        repo: str,
+        pr_id: int,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+        reviewers: Optional[List[str]] = None,
+        destination_branch: Optional[str] = None,
+        close_source_branch: Optional[bool] = None,
+    ) -> PullRequest:
+        """
+        Update an existing pull request.
+
+        Only fields that are explicitly passed (non-None) are sent. Bitbucket
+        *replaces* (does not merge) the reviewers list — pass the full desired
+        list, or omit the parameter entirely to leave reviewers unchanged. Pass
+        ``reviewers=[]`` to clear all reviewers.
+
+        Args:
+            workspace:           Bitbucket workspace slug.
+            repo:                Repository slug.
+            pr_id:               The PR number to update.
+            title:               New PR title.
+            description:         New PR description (Markdown supported).
+            reviewers:           Full replacement list of reviewer UUIDs.
+                                 Pass ``[]`` to clear, omit to leave unchanged.
+            destination_branch:  Re-target the PR to a different destination.
+            close_source_branch: Whether to delete the source branch on merge.
+
+        Returns:
+            The updated PullRequest.
+
+        Raises:
+            ValueError: if no updatable field is provided.
+        """
+        _require("workspace", workspace)
+        _require("repo", repo)
+
+        payload: dict = {}
+        if title is not None:
+            payload["title"] = title
+        if description is not None:
+            payload["description"] = description
+        if reviewers is not None:
+            payload["reviewers"] = [{"uuid": uuid} for uuid in reviewers]
+        if destination_branch is not None:
+            payload["destination"] = {"branch": {"name": destination_branch}}
+        if close_source_branch is not None:
+            payload["close_source_branch"] = close_source_branch
+
+        if not payload:
+            raise ValueError(
+                "update() requires at least one field to change "
+                "(title, description, reviewers, destination_branch, close_source_branch)"
+            )
+
+        data = self._http.put(_pr_path(workspace, repo, pr_id), json=payload)
         return PullRequest.from_dict(data)
 
 

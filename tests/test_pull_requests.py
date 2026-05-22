@@ -542,5 +542,135 @@ class TestCreate(unittest.TestCase):
         self.assertEqual(result.title, "Fix the bug")
 
 
+class TestUpdate(unittest.TestCase):
+
+    def test_update_calls_put_with_correct_path(self):
+        resource, http = _make_resource()
+        http.put.return_value = _PR_DATA
+
+        resource.update("ws", "repo", 42, title="New title")
+
+        http.put.assert_called_once()
+        args, kwargs = http.put.call_args
+        self.assertEqual(args[0], "/repositories/ws/repo/pullrequests/42")
+
+    def test_update_title_only(self):
+        resource, http = _make_resource()
+        http.put.return_value = _PR_DATA
+
+        resource.update("ws", "repo", 42, title="Renamed")
+
+        payload = http.put.call_args.kwargs["json"]
+        self.assertEqual(payload, {"title": "Renamed"})
+
+    def test_update_description_only(self):
+        resource, http = _make_resource()
+        http.put.return_value = _PR_DATA
+
+        resource.update("ws", "repo", 42, description="A new body")
+
+        payload = http.put.call_args.kwargs["json"]
+        self.assertEqual(payload, {"description": "A new body"})
+
+    def test_update_reviewers_replaces_list(self):
+        resource, http = _make_resource()
+        http.put.return_value = _PR_DATA
+
+        resource.update("ws", "repo", 42, reviewers=["{uuid-1}", "{uuid-2}"])
+
+        payload = http.put.call_args.kwargs["json"]
+        self.assertEqual(payload, {"reviewers": [{"uuid": "{uuid-1}"}, {"uuid": "{uuid-2}"}]})
+
+    def test_update_empty_reviewers_clears_list(self):
+        """reviewers=[] is meaningful — it clears all reviewers."""
+        resource, http = _make_resource()
+        http.put.return_value = _PR_DATA
+
+        resource.update("ws", "repo", 42, reviewers=[])
+
+        payload = http.put.call_args.kwargs["json"]
+        self.assertEqual(payload, {"reviewers": []})
+
+    def test_update_omitting_reviewers_does_not_send_field(self):
+        """reviewers=None must NOT appear in the payload (leave unchanged)."""
+        resource, http = _make_resource()
+        http.put.return_value = _PR_DATA
+
+        resource.update("ws", "repo", 42, title="Just a title change")
+
+        payload = http.put.call_args.kwargs["json"]
+        self.assertNotIn("reviewers", payload)
+
+    def test_update_destination_branch(self):
+        resource, http = _make_resource()
+        http.put.return_value = _PR_DATA
+
+        resource.update("ws", "repo", 42, destination_branch="develop")
+
+        payload = http.put.call_args.kwargs["json"]
+        self.assertEqual(payload, {"destination": {"branch": {"name": "develop"}}})
+
+    def test_update_close_source_branch(self):
+        resource, http = _make_resource()
+        http.put.return_value = _PR_DATA
+
+        resource.update("ws", "repo", 42, close_source_branch=True)
+
+        payload = http.put.call_args.kwargs["json"]
+        self.assertEqual(payload, {"close_source_branch": True})
+
+    def test_update_multiple_fields(self):
+        resource, http = _make_resource()
+        http.put.return_value = _PR_DATA
+
+        resource.update(
+            "ws", "repo", 42,
+            title="New title",
+            description="New body",
+            close_source_branch=False,
+        )
+
+        payload = http.put.call_args.kwargs["json"]
+        self.assertEqual(
+            payload,
+            {"title": "New title", "description": "New body", "close_source_branch": False},
+        )
+
+    def test_update_returns_pull_request(self):
+        resource, http = _make_resource()
+        http.put.return_value = _PR_DATA
+
+        result = resource.update("ws", "repo", 42, title="x")
+
+        self.assertIsInstance(result, PullRequest)
+        self.assertEqual(result.id, 42)
+        self.assertEqual(result.title, "Fix the bug")  # from _PR_DATA fixture
+
+    def test_update_without_any_field_raises(self):
+        resource, http = _make_resource()
+
+        with self.assertRaises(ValueError) as ctx:
+            resource.update("ws", "repo", 42)
+
+        self.assertIn("at least one field", str(ctx.exception))
+        http.put.assert_not_called()
+
+    def test_update_requires_workspace(self):
+        resource, http = _make_resource()
+
+        with self.assertRaises(ValueError):
+            resource.update("", "repo", 42, title="x")
+
+        http.put.assert_not_called()
+
+    def test_update_requires_repo(self):
+        resource, http = _make_resource()
+
+        with self.assertRaises(ValueError):
+            resource.update("ws", "", 42, title="x")
+
+        http.put.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
