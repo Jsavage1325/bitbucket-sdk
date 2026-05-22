@@ -368,6 +368,34 @@ class TestCase:
 
 
 # ---------------------------------------------------------------------------
+# PipelineVariable (repo-level env vars used by Bitbucket Pipelines)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PipelineVariable:
+    """A repo-level environment variable used by Bitbucket Pipelines runs.
+
+    For secured variables the value is never returned by Bitbucket — the SDK
+    surfaces this as ``value=None`` and ``secured=True``.
+    """
+
+    uuid: str = ""
+    key: str = ""
+    value: Optional[str] = None
+    secured: bool = False
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "PipelineVariable":
+        return cls(
+            uuid=data.get("uuid", ""),
+            key=data.get("key", ""),
+            value=data.get("value"),
+            secured=data.get("secured", False),
+        )
+
+
+# ---------------------------------------------------------------------------
 # SrcEntry (file/directory listing under /src)
 # ---------------------------------------------------------------------------
 

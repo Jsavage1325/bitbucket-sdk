@@ -1,22 +1,28 @@
 """
 PipelinesResource — accessed via client.pipelines
 
-Methods:
+Methods (reads):
   list(workspace, repo, ref=None, status=None, page_size=10)  →  PagedList[Pipeline]
   list_all(workspace, repo, ref=None, status=None)            →  Iterator[Pipeline]
   get(workspace, repo, pipeline_uuid)                         →  Pipeline
-  list_steps(workspace, repo, pipeline_uuid)                  →  list[PipelineStep]
+  list_steps(workspace, repo, pipeline_uuid)                  →  PagedList[PipelineStep]
   get_step_log(workspace, repo, pipeline_uuid, step_uuid,
                tail_lines=None)                                →  str
   list_test_cases(workspace, repo, pipeline_uuid, step_uuid)  →  PagedList[TestCase]
+
+Methods (pipeline variables — repo-level env vars):
+  list_variables(workspace, repo)                             →  list[PipelineVariable]
+  set_variable(workspace, repo, key, value, secured=False)    →  PipelineVariable  (upsert)
+  delete_variable(workspace, repo, key)                       →  None
 """
 
 from __future__ import annotations
 
-from typing import Iterator, Optional
+from typing import Iterator, List, Optional
 
 from .._http import HTTPClient
-from ..models import PagedList, Pipeline, PipelineStep, TestCase
+from ..exceptions import NotFoundError
+from ..models import PagedList, Pipeline, PipelineStep, PipelineVariable, TestCase
 
 
 class PipelinesResource:
@@ -194,6 +200,107 @@ class PipelinesResource:
             pagelen=data.get("pagelen", 0),
             next=data.get("next"),
             previous=data.get("previous"),
+        )
+
+
+    # ------------------------------------------------------------------
+    # list_variables — repo-level pipeline env vars, auto-paginated
+    # ------------------------------------------------------------------
+
+    def list_variables(self, workspace: str, repo: str) -> List[PipelineVariable]:
+        """
+        Return all repository-level pipeline variables.
+
+        Auto-paginates across all pages (typical repos have <50 variables so
+        this is rarely more than a single API call). Secured variables have
+        value=None — Bitbucket never returns secured values via the API.
+        """
+        _require("workspace", workspace)
+        _require("repo", repo)
+        results: List[PipelineVariable] = []
+        path: Optional[str] = (
+            f"/repositories/{workspace}/{repo}/pipelines_config/variables/"
+        )
+        params: Optional[dict] = {"pagelen": 100}
+        while path:
+            if params is None:
+                # Subsequent pages: path is a full URL from the previous response's next
+                data = self._http.get_next_page(path)
+            else:
+                data = self._http.get(path, params=params)
+                params = None  # only the first page carries query params
+            results.extend(
+                PipelineVariable.from_dict(v) for v in data.get("values", [])
+            )
+            path = data.get("next")
+        return results
+
+    # ------------------------------------------------------------------
+    # set_variable — upsert by key (POST if new, PUT if exists)
+    # ------------------------------------------------------------------
+
+    def set_variable(
+        self,
+        workspace: str,
+        repo: str,
+        key: str,
+        value: str,
+        secured: bool = False,
+    ) -> PipelineVariable:
+        """
+        Create or update a repo-level pipeline variable.
+
+        Looks up the variable by key first; POSTs a new variable when none
+        exists, PUTs to the existing UUID otherwise. The value of a secured
+        variable cannot be read back after it is set — only its key and
+        ``secured=True`` will be returned by subsequent list_variables calls.
+
+        Args:
+            workspace: Bitbucket workspace slug.
+            repo:      Repository slug.
+            key:       Variable name (e.g. "AWS_ACCESS_KEY_ID_QA").
+            value:     The value to store.
+            secured:   If True, Bitbucket marks the variable as a secret and
+                       its value is no longer readable via the API.
+        """
+        _require("workspace", workspace)
+        _require("repo", repo)
+        _require("key", key)
+        existing = next(
+            (v for v in self.list_variables(workspace, repo) if v.key == key),
+            None,
+        )
+        payload = {"key": key, "value": value, "secured": secured}
+        base = f"/repositories/{workspace}/{repo}/pipelines_config/variables/"
+        if existing is not None:
+            data = self._http.put(f"{base}{existing.uuid}", json=payload)
+        else:
+            data = self._http.post(base, json=payload)
+        return PipelineVariable.from_dict(data)
+
+    # ------------------------------------------------------------------
+    # delete_variable — by key (looks up UUID, then DELETE)
+    # ------------------------------------------------------------------
+
+    def delete_variable(self, workspace: str, repo: str, key: str) -> None:
+        """
+        Delete a repo-level pipeline variable by key.
+
+        Raises NotFoundError if no variable with that key exists.
+        """
+        _require("workspace", workspace)
+        _require("repo", repo)
+        _require("key", key)
+        existing = next(
+            (v for v in self.list_variables(workspace, repo) if v.key == key),
+            None,
+        )
+        if existing is None:
+            raise NotFoundError(
+                f"Pipeline variable {key!r} not found in {workspace}/{repo}"
+            )
+        self._http.delete(
+            f"/repositories/{workspace}/{repo}/pipelines_config/variables/{existing.uuid}"
         )
 
 

@@ -8,7 +8,14 @@ Matches the pattern in test_repositories.py / test_pull_requests.py.
 import unittest
 from unittest.mock import MagicMock
 
-from bitbucket_sdk.models import PagedList, Pipeline, PipelineStep, TestCase
+from bitbucket_sdk.exceptions import NotFoundError
+from bitbucket_sdk.models import (
+    PagedList,
+    Pipeline,
+    PipelineStep,
+    PipelineVariable,
+    TestCase,
+)
 from bitbucket_sdk.resources.pipelines import PipelinesResource
 
 
@@ -326,6 +333,158 @@ class TestPipelinesValidation(unittest.TestCase):
         resource, _ = _make_resource()
         with self.assertRaises(ValueError):
             resource.list_test_cases("ws", "repo", "{p1}", "")
+
+
+# ---------------------------------------------------------------------------
+# Pipeline Variables (Phase D)
+# ---------------------------------------------------------------------------
+
+
+_VAR_PLAIN = {"uuid": "{v1}", "key": "API_URL", "value": "https://api.example.com", "secured": False}
+_VAR_SECURED = {"uuid": "{v2}", "key": "DEPLOY_KEY", "value": None, "secured": True}
+
+
+class TestPipelinesListVariables(unittest.TestCase):
+
+    def test_list_variables_single_page(self):
+        resource, http = _make_resource()
+        http.get.return_value = {
+            "values": [_VAR_PLAIN, _VAR_SECURED],
+            "size": 2,
+            "page": 1,
+            "pagelen": 100,
+        }
+
+        result = resource.list_variables("ws", "repo")
+
+        http.get.assert_called_once_with(
+            "/repositories/ws/repo/pipelines_config/variables/",
+            params={"pagelen": 100},
+        )
+        self.assertEqual(len(result), 2)
+        self.assertIsInstance(result[0], PipelineVariable)
+        self.assertEqual(result[0].key, "API_URL")
+        self.assertEqual(result[0].value, "https://api.example.com")
+        self.assertFalse(result[0].secured)
+        self.assertEqual(result[1].key, "DEPLOY_KEY")
+        self.assertIsNone(result[1].value)
+        self.assertTrue(result[1].secured)
+
+    def test_list_variables_paginates(self):
+        resource, http = _make_resource()
+        http.get.return_value = {
+            "values": [_VAR_PLAIN],
+            "size": 2,
+            "page": 1,
+            "pagelen": 100,
+            "next": "https://api.bitbucket.org/2.0/repositories/ws/repo/pipelines_config/variables/?page=2",
+        }
+        http.get_next_page.return_value = {
+            "values": [_VAR_SECURED],
+            "size": 2,
+            "page": 2,
+            "pagelen": 100,
+        }
+
+        result = resource.list_variables("ws", "repo")
+
+        self.assertEqual(len(result), 2)
+        http.get_next_page.assert_called_once()
+
+
+class TestPipelinesSetVariable(unittest.TestCase):
+
+    def test_set_variable_posts_when_new(self):
+        resource, http = _make_resource()
+        http.get.return_value = {"values": [], "size": 0, "page": 1, "pagelen": 100}
+        http.post.return_value = {
+            "uuid": "{v3}",
+            "key": "NEW_VAR",
+            "value": "hello",
+            "secured": False,
+        }
+
+        result = resource.set_variable("ws", "repo", "NEW_VAR", "hello")
+
+        http.post.assert_called_once_with(
+            "/repositories/ws/repo/pipelines_config/variables/",
+            json={"key": "NEW_VAR", "value": "hello", "secured": False},
+        )
+        http.put.assert_not_called()
+        self.assertEqual(result.key, "NEW_VAR")
+
+    def test_set_variable_puts_when_existing(self):
+        resource, http = _make_resource()
+        http.get.return_value = {
+            "values": [_VAR_PLAIN],
+            "size": 1,
+            "page": 1,
+            "pagelen": 100,
+        }
+        http.put.return_value = {
+            "uuid": "{v1}",
+            "key": "API_URL",
+            "value": "https://new.example.com",
+            "secured": False,
+        }
+
+        result = resource.set_variable("ws", "repo", "API_URL", "https://new.example.com")
+
+        http.put.assert_called_once_with(
+            "/repositories/ws/repo/pipelines_config/variables/{v1}",
+            json={"key": "API_URL", "value": "https://new.example.com", "secured": False},
+        )
+        http.post.assert_not_called()
+        self.assertEqual(result.value, "https://new.example.com")
+
+    def test_set_variable_with_secured_flag(self):
+        resource, http = _make_resource()
+        http.get.return_value = {"values": [], "size": 0, "page": 1, "pagelen": 100}
+        http.post.return_value = {
+            "uuid": "{v4}",
+            "key": "TOKEN",
+            "value": None,
+            "secured": True,
+        }
+
+        resource.set_variable("ws", "repo", "TOKEN", "secret-value", secured=True)
+
+        payload = http.post.call_args.kwargs["json"]
+        self.assertTrue(payload["secured"])
+        self.assertEqual(payload["value"], "secret-value")
+
+    def test_set_variable_requires_key(self):
+        resource, http = _make_resource()
+        with self.assertRaises(ValueError):
+            resource.set_variable("ws", "repo", "", "value")
+        http.post.assert_not_called()
+
+
+class TestPipelinesDeleteVariable(unittest.TestCase):
+
+    def test_delete_variable_when_exists(self):
+        resource, http = _make_resource()
+        http.get.return_value = {
+            "values": [_VAR_PLAIN],
+            "size": 1,
+            "page": 1,
+            "pagelen": 100,
+        }
+
+        resource.delete_variable("ws", "repo", "API_URL")
+
+        http.delete.assert_called_once_with(
+            "/repositories/ws/repo/pipelines_config/variables/{v1}"
+        )
+
+    def test_delete_variable_raises_when_missing(self):
+        resource, http = _make_resource()
+        http.get.return_value = {"values": [], "size": 0, "page": 1, "pagelen": 100}
+
+        with self.assertRaises(NotFoundError):
+            resource.delete_variable("ws", "repo", "DOES_NOT_EXIST")
+
+        http.delete.assert_not_called()
 
 
 if __name__ == "__main__":
