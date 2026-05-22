@@ -256,6 +256,43 @@ class DiffStat:
 
 
 # ---------------------------------------------------------------------------
+# SrcEntry (file/directory listing under /src)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SrcEntry:
+    """One entry returned by listing a directory in a repository.
+
+    type is "commit_file" or "commit_directory" (Bitbucket's terms).
+    size is bytes for files, None for directories.
+    """
+
+    type: str = ""
+    path: str = ""
+    size: Optional[int] = None
+    commit_hash: Optional[str] = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SrcEntry":
+        commit = data.get("commit") or {}
+        return cls(
+            type=data.get("type", ""),
+            path=data.get("path", ""),
+            size=data.get("size"),
+            commit_hash=commit.get("hash"),
+        )
+
+    @property
+    def is_file(self) -> bool:
+        return self.type == "commit_file"
+
+    @property
+    def is_directory(self) -> bool:
+        return self.type == "commit_directory"
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

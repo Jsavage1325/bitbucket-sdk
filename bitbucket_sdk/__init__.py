@@ -42,6 +42,7 @@ from .models import (
     PullRequest,
     Ref,
     Repository,
+    SrcEntry,
     User,
 )
 
@@ -71,5 +72,6 @@ __all__ = [
     "Inline",
     "Participant",
     "Ref",
+    "SrcEntry",
     "User",
 ]

@@ -13,7 +13,8 @@ import unittest
 from unittest.mock import MagicMock
 
 from bitbucket_sdk.resources.repositories import RepositoriesResource
-from bitbucket_sdk.models import Repository, PagedList
+from bitbucket_sdk.models import Repository, PagedList, SrcEntry
+from bitbucket_sdk.exceptions import NotFoundError
 
 
 def _make_resource():
@@ -124,6 +125,128 @@ class TestRepositoriesGetCommitDiff(unittest.TestCase):
 
         self.assertIsInstance(result, str)
         self.assertEqual(result, expected)
+
+
+class TestRepositoriesGetFile(unittest.TestCase):
+
+    def test_get_file_with_explicit_ref(self):
+        resource, http = _make_resource()
+        http.get_raw.return_value = "file contents here"
+
+        result = resource.get_file("ws", "repo", "src/main.py", ref="develop")
+
+        http.get_raw.assert_called_once_with("/repositories/ws/repo/src/develop/src/main.py")
+        self.assertEqual(result, "file contents here")
+
+    def test_get_file_strips_leading_slash_in_path(self):
+        resource, http = _make_resource()
+        http.get_raw.return_value = ""
+
+        resource.get_file("ws", "repo", "/src/main.py", ref="develop")
+
+        http.get_raw.assert_called_once_with("/repositories/ws/repo/src/develop/src/main.py")
+
+    def test_get_file_looks_up_default_branch_when_ref_is_none(self):
+        resource, http = _make_resource()
+        # First call resolves the default branch; second fetches the file.
+        http.get.return_value = {"mainbranch": {"name": "main"}}
+        http.get_raw.return_value = "content"
+
+        resource.get_file("ws", "repo", "README.md")
+
+        http.get.assert_called_once_with("/repositories/ws/repo")
+        http.get_raw.assert_called_once_with("/repositories/ws/repo/src/main/README.md")
+
+    def test_get_file_raises_when_default_branch_unknown(self):
+        resource, http = _make_resource()
+        http.get.return_value = {}  # no mainbranch field
+
+        with self.assertRaises(NotFoundError):
+            resource.get_file("ws", "repo", "README.md")
+
+        http.get_raw.assert_not_called()
+
+    def test_get_file_requires_path(self):
+        resource, http = _make_resource()
+
+        with self.assertRaises(ValueError):
+            resource.get_file("ws", "repo", "", ref="main")
+
+        http.get_raw.assert_not_called()
+
+
+class TestRepositoriesListDirectory(unittest.TestCase):
+
+    def test_list_directory_calls_meta_endpoint(self):
+        resource, http = _make_resource()
+        http.get.return_value = {"values": [], "size": 0, "page": 1, "pagelen": 10}
+
+        resource.list_directory("ws", "repo", "src", ref="develop")
+
+        # Single call — directly passes through, no main-branch lookup needed.
+        http.get.assert_called_once_with(
+            "/repositories/ws/repo/src/develop/src",
+            params={"format": "meta"},
+        )
+
+    def test_list_directory_defaults_path_to_root(self):
+        resource, http = _make_resource()
+        http.get.return_value = {"values": [], "size": 0, "page": 1, "pagelen": 10}
+
+        resource.list_directory("ws", "repo", ref="develop")
+
+        http.get.assert_called_once_with(
+            "/repositories/ws/repo/src/develop/",
+            params={"format": "meta"},
+        )
+
+    def test_list_directory_strips_leading_slash(self):
+        resource, http = _make_resource()
+        http.get.return_value = {"values": [], "size": 0, "page": 1, "pagelen": 10}
+
+        resource.list_directory("ws", "repo", "/src/lib", ref="develop")
+
+        http.get.assert_called_once_with(
+            "/repositories/ws/repo/src/develop/src/lib",
+            params={"format": "meta"},
+        )
+
+    def test_list_directory_looks_up_default_branch_when_ref_is_none(self):
+        resource, http = _make_resource()
+        http.get.side_effect = [
+            {"mainbranch": {"name": "main"}},  # repo lookup for default branch
+            {"values": [], "size": 0, "page": 1, "pagelen": 10},  # actual dir listing
+        ]
+
+        resource.list_directory("ws", "repo", "src")
+
+        self.assertEqual(http.get.call_count, 2)
+        self.assertEqual(http.get.call_args_list[0][0], ("/repositories/ws/repo",))
+        self.assertEqual(
+            http.get.call_args_list[1][0], ("/repositories/ws/repo/src/main/src",)
+        )
+
+    def test_list_directory_returns_paged_list_of_src_entries(self):
+        resource, http = _make_resource()
+        http.get.return_value = {
+            "values": [
+                {"type": "commit_directory", "path": "src/lib"},
+                {"type": "commit_file", "path": "src/main.py", "size": 1234},
+            ],
+            "size": 2,
+            "page": 1,
+            "pagelen": 10,
+        }
+
+        result = resource.list_directory("ws", "repo", "src", ref="develop")
+
+        self.assertIsInstance(result, PagedList)
+        self.assertEqual(len(result), 2)
+        self.assertIsInstance(result.values[0], SrcEntry)
+        self.assertTrue(result.values[0].is_directory)
+        self.assertEqual(result.values[0].path, "src/lib")
+        self.assertTrue(result.values[1].is_file)
+        self.assertEqual(result.values[1].size, 1234)
 
 
 if __name__ == "__main__":
