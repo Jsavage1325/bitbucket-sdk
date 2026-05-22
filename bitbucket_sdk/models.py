@@ -256,6 +256,118 @@ class DiffStat:
 
 
 # ---------------------------------------------------------------------------
+# Pipeline / PipelineStep / TestCase
+# ---------------------------------------------------------------------------
+
+
+def _pipeline_state(data: dict) -> str:
+    """Bitbucket nests state name under state.name."""
+    state = data.get("state") or {}
+    return state.get("name", "")
+
+
+def _pipeline_result(data: dict) -> str:
+    """Bitbucket nests result name under state.result.name."""
+    state = data.get("state") or {}
+    result = state.get("result") or {}
+    return result.get("name", "")
+
+
+@dataclass
+class Pipeline:
+    uuid: str = ""
+    build_number: int = 0
+    state: str = ""             # PENDING / IN_PROGRESS / COMPLETED
+    result: str = ""            # SUCCESSFUL / FAILED / STOPPED / ERROR / "" while in flight
+    ref_type: str = ""          # "branch" / "tag" / "named_branch"
+    ref_name: str = ""
+    commit_hash: str = ""
+    creator_display_name: str = ""
+    created_on: Optional[datetime] = None
+    completed_on: Optional[datetime] = None
+    duration_in_seconds: int = 0
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Pipeline":
+        target = data.get("target") or {}
+        commit = target.get("commit") or {}
+        creator = data.get("creator") or {}
+        return cls(
+            uuid=data.get("uuid", ""),
+            build_number=data.get("build_number", 0),
+            state=_pipeline_state(data),
+            result=_pipeline_result(data),
+            ref_type=target.get("ref_type", ""),
+            ref_name=target.get("ref_name", ""),
+            commit_hash=commit.get("hash", ""),
+            creator_display_name=creator.get("display_name", ""),
+            created_on=_parse_dt(data.get("created_on")),
+            completed_on=_parse_dt(data.get("completed_on")),
+            duration_in_seconds=data.get("duration_in_seconds", 0),
+        )
+
+    @property
+    def is_finished(self) -> bool:
+        return self.state == "COMPLETED"
+
+    @property
+    def is_successful(self) -> bool:
+        return self.is_finished and self.result == "SUCCESSFUL"
+
+
+@dataclass
+class PipelineStep:
+    uuid: str = ""
+    name: str = ""
+    state: str = ""             # PENDING / IN_PROGRESS / COMPLETED
+    result: str = ""            # SUCCESSFUL / FAILED / STOPPED / ERROR / ""
+    started_on: Optional[datetime] = None
+    completed_on: Optional[datetime] = None
+    duration_in_seconds: int = 0
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "PipelineStep":
+        return cls(
+            uuid=data.get("uuid", ""),
+            name=data.get("name", ""),
+            state=_pipeline_state(data),
+            result=_pipeline_result(data),
+            started_on=_parse_dt(data.get("started_on")),
+            completed_on=_parse_dt(data.get("completed_on")),
+            duration_in_seconds=data.get("duration_in_seconds", 0),
+        )
+
+
+@dataclass
+class TestCase:
+    # Tell pytest NOT to try to collect this as a test class (the name matches its
+    # auto-discovery pattern but this is a Bitbucket data model, not a unittest case).
+    __test__ = False
+
+    name: str = ""
+    status: str = ""            # PASSED / FAILED / ERROR / SKIPPED
+    duration_in_ms: int = 0
+    package_name: str = ""
+    class_name: str = ""
+    fully_qualified_name: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "TestCase":
+        return cls(
+            name=data.get("name", ""),
+            status=data.get("status", ""),
+            duration_in_ms=data.get("duration_in_ms", 0),
+            package_name=data.get("package_name", ""),
+            class_name=data.get("class_name", ""),
+            fully_qualified_name=data.get("fully_qualified_name", ""),
+        )
+
+    @property
+    def is_failure(self) -> bool:
+        return self.status in {"FAILED", "ERROR"}
+
+
+# ---------------------------------------------------------------------------
 # SrcEntry (file/directory listing under /src)
 # ---------------------------------------------------------------------------
 

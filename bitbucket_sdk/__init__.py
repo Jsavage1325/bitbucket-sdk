@@ -39,10 +39,13 @@ from .models import (
     Inline,
     PagedList,
     Participant,
+    Pipeline,
+    PipelineStep,
     PullRequest,
     Ref,
     Repository,
     SrcEntry,
+    TestCase,
     User,
 )
 
@@ -71,7 +74,10 @@ __all__ = [
     "DiffStat",
     "Inline",
     "Participant",
+    "Pipeline",
+    "PipelineStep",
     "Ref",
     "SrcEntry",
+    "TestCase",
     "User",
 ]
