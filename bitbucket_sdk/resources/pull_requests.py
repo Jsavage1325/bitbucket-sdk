@@ -11,7 +11,7 @@ Methods:
   list_comments(workspace, repo, pr_id)          →  PagedList[Comment]
   list_all_comments(workspace, repo, pr_id)      →  Iterator[Comment]
   list_unresolved_comments(...)                  →  list[Comment]
-  post_comment(...)                              →  Comment
+  post_comment(..., parent_id=None)              →  Comment   (pass parent_id for threaded replies)
   resolve_comment(...)                           →  None
   approve(workspace, repo, pr_id)               →  None
   unapprove(workspace, repo, pr_id)             →  None
@@ -262,12 +262,18 @@ class PullRequestsResource:
         body: str,
         file_path: Optional[str] = None,
         line: Optional[int] = None,
+        parent_id: Optional[int] = None,
     ) -> Comment:
         """
         Post a comment on a pull request.
 
-        Provide ``file_path`` **and** ``line`` together for an inline comment.
-        Omit both for a general PR comment.
+        Three modes:
+          - General comment:  pass only ``body``.
+          - Inline comment:   pass ``body`` + ``file_path`` + ``line``.
+          - Threaded reply:   pass ``body`` + ``parent_id``. Bitbucket inherits
+                              the inline location from the parent automatically,
+                              so ``file_path`` / ``line`` are not required for
+                              replies to inline comments.
 
         Args:
             workspace: Bitbucket workspace slug.
@@ -276,6 +282,8 @@ class PullRequestsResource:
             body:      Comment text (Markdown supported).
             file_path: File path for an inline comment — must be paired with ``line``.
             line:      Line number (1-based) — must be paired with ``file_path``.
+            parent_id: ID of an existing comment to reply to. When set, the new
+                       comment is threaded under that parent.
         """
         _require("workspace", workspace)
         _require("repo", repo)
@@ -289,6 +297,9 @@ class PullRequestsResource:
             raise ValueError(
                 "Both 'file_path' and 'line' must be provided together for an inline comment."
             )
+
+        if parent_id is not None:
+            payload["parent"] = {"id": parent_id}
 
         data = self._http.post(f"{_pr_path(workspace, repo, pr_id)}/comments", json=payload)
         return Comment.from_dict(data)
