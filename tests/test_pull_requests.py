@@ -347,6 +347,50 @@ class TestPostComment(unittest.TestCase):
         with self.assertRaises(ValueError):
             resource.post_comment("ws", "repo", 42, "comment", line=10)
 
+    def test_post_reply_with_parent_id(self):
+        """Threaded reply: parent_id alone, no inline block needed.
+
+        Bitbucket inherits the inline location from the parent comment.
+        """
+        resource, http = _make_resource()
+        http.post.return_value = _COMMENT_DATA
+
+        resource.post_comment("ws", "repo", 42, "ack — fixed in next commit", parent_id=12345)
+
+        payload = http.post.call_args.kwargs["json"]
+        self.assertEqual(
+            payload,
+            {"content": {"raw": "ack — fixed in next commit"}, "parent": {"id": 12345}},
+        )
+        self.assertNotIn("inline", payload)
+
+    def test_post_reply_with_parent_id_and_inline_both_sent(self):
+        """parent_id + inline both passed: SDK forwards both. Bitbucket accepts.
+
+        Callers who pass both either reaffirm the location explicitly, or
+        compose with library code that doesn't know the parent is inline.
+        """
+        resource, http = _make_resource()
+        http.post.return_value = _COMMENT_DATA
+
+        resource.post_comment(
+            "ws", "repo", 42, "see the parent thread",
+            file_path="src/auth.py", line=42, parent_id=12345,
+        )
+
+        payload = http.post.call_args.kwargs["json"]
+        self.assertEqual(payload["parent"], {"id": 12345})
+        self.assertEqual(payload["inline"], {"path": "src/auth.py", "to": 42})
+
+    def test_post_comment_without_parent_id_does_not_send_parent_field(self):
+        resource, http = _make_resource()
+        http.post.return_value = _COMMENT_DATA
+
+        resource.post_comment("ws", "repo", 42, "general comment")
+
+        payload = http.post.call_args.kwargs["json"]
+        self.assertNotIn("parent", payload)
+
 
 # ---------------------------------------------------------------------------
 # resolve_comment
