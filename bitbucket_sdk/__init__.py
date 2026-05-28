@@ -39,9 +39,14 @@ from .models import (
     Inline,
     PagedList,
     Participant,
+    Pipeline,
+    PipelineStep,
+    PipelineVariable,
     PullRequest,
     Ref,
     Repository,
+    SrcEntry,
+    TestCase,
     User,
 )
 
@@ -70,6 +75,11 @@ __all__ = [
     "DiffStat",
     "Inline",
     "Participant",
+    "Pipeline",
+    "PipelineStep",
+    "PipelineVariable",
     "Ref",
+    "SrcEntry",
+    "TestCase",
     "User",
 ]
