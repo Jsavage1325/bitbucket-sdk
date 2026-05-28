@@ -11,13 +11,15 @@ Methods:
   list_comments(workspace, repo, pr_id)          →  PagedList[Comment]
   list_all_comments(workspace, repo, pr_id)      →  Iterator[Comment]
   list_unresolved_comments(...)                  →  list[Comment]
-  post_comment(...)                              →  Comment
+  post_comment(..., parent_id=None)              →  Comment   (pass parent_id for threaded replies)
   resolve_comment(...)                           →  None
   approve(workspace, repo, pr_id)               →  None
   unapprove(workspace, repo, pr_id)             →  None
   decline(workspace, repo, pr_id)               →  PullRequest
   merge(workspace, repo, pr_id, strategy=..., close_source_branch=None, message=None)  →  PullRequest
   create(..., reviewers=None, close_source_branch=False)                               →  PullRequest
+  update(workspace, repo, pr_id, title=None, description=None, reviewers=None,
+         destination_branch=None, close_source_branch=None)                            →  PullRequest
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from typing import Iterator, List, Optional
 from .._http import HTTPClient
 from ..exceptions import NotFoundError
 from ..models import Comment, DiffStat, PagedList, PullRequest
+from ._utils import _require
 
 
 class PullRequestsResource:
@@ -260,12 +263,18 @@ class PullRequestsResource:
         body: str,
         file_path: Optional[str] = None,
         line: Optional[int] = None,
+        parent_id: Optional[int] = None,
     ) -> Comment:
         """
         Post a comment on a pull request.
 
-        Provide ``file_path`` **and** ``line`` together for an inline comment.
-        Omit both for a general PR comment.
+        Three modes:
+          - General comment:  pass only ``body``.
+          - Inline comment:   pass ``body`` + ``file_path`` + ``line``.
+          - Threaded reply:   pass ``body`` + ``parent_id``. Bitbucket inherits
+                              the inline location from the parent automatically,
+                              so ``file_path`` / ``line`` are not required for
+                              replies to inline comments.
 
         Args:
             workspace: Bitbucket workspace slug.
@@ -274,6 +283,8 @@ class PullRequestsResource:
             body:      Comment text (Markdown supported).
             file_path: File path for an inline comment — must be paired with ``line``.
             line:      Line number (1-based) — must be paired with ``file_path``.
+            parent_id: ID of an existing comment to reply to. When set, the new
+                       comment is threaded under that parent.
         """
         _require("workspace", workspace)
         _require("repo", repo)
@@ -287,6 +298,9 @@ class PullRequestsResource:
             raise ValueError(
                 "Both 'file_path' and 'line' must be provided together for an inline comment."
             )
+
+        if parent_id is not None:
+            payload["parent"] = {"id": parent_id}
 
         data = self._http.post(f"{_pr_path(workspace, repo, pr_id)}/comments", json=payload)
         return Comment.from_dict(data)
@@ -441,6 +455,70 @@ class PullRequestsResource:
         data = self._http.post(_pr_base(workspace, repo), json=payload)
         return PullRequest.from_dict(data)
 
+    # ------------------------------------------------------------------
+    # update
+    # ------------------------------------------------------------------
+
+    def update(
+        self,
+        workspace: str,
+        repo: str,
+        pr_id: int,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+        reviewers: Optional[List[str]] = None,
+        destination_branch: Optional[str] = None,
+        close_source_branch: Optional[bool] = None,
+    ) -> PullRequest:
+        """
+        Update an existing pull request.
+
+        Only fields that are explicitly passed (non-None) are sent. Bitbucket
+        *replaces* (does not merge) the reviewers list — pass the full desired
+        list, or omit the parameter entirely to leave reviewers unchanged. Pass
+        ``reviewers=[]`` to clear all reviewers.
+
+        Args:
+            workspace:           Bitbucket workspace slug.
+            repo:                Repository slug.
+            pr_id:               The PR number to update.
+            title:               New PR title.
+            description:         New PR description (Markdown supported).
+            reviewers:           Full replacement list of reviewer UUIDs.
+                                 Pass ``[]`` to clear, omit to leave unchanged.
+            destination_branch:  Re-target the PR to a different destination.
+            close_source_branch: Whether to delete the source branch on merge.
+
+        Returns:
+            The updated PullRequest.
+
+        Raises:
+            ValueError: if no updatable field is provided.
+        """
+        _require("workspace", workspace)
+        _require("repo", repo)
+
+        payload: dict = {}
+        if title is not None:
+            payload["title"] = title
+        if description is not None:
+            payload["description"] = description
+        if reviewers is not None:
+            payload["reviewers"] = [{"uuid": uuid} for uuid in reviewers]
+        if destination_branch is not None:
+            payload["destination"] = {"branch": {"name": destination_branch}}
+        if close_source_branch is not None:
+            payload["close_source_branch"] = close_source_branch
+
+        if not payload:
+            raise ValueError(
+                "update() requires at least one field to change "
+                "(title, description, reviewers, destination_branch, close_source_branch)"
+            )
+
+        data = self._http.put(_pr_path(workspace, repo, pr_id), json=payload)
+        return PullRequest.from_dict(data)
+
 
 # ---------------------------------------------------------------------------
 # Path helpers
@@ -479,11 +557,3 @@ def _parse_comment_page(data: dict) -> PagedList[Comment]:
     )
 
 
-# ---------------------------------------------------------------------------
-# Validation
-# ---------------------------------------------------------------------------
-
-
-def _require(name: str, value: str) -> None:
-    if not value or not str(value).strip():
-        raise ValueError(f"'{name}' must not be empty")

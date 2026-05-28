@@ -350,14 +350,20 @@ class TestAPITokenAuth(unittest.TestCase):
 
     def test_raises_if_email_missing(self):
         from bitbucket_sdk.auth import APITokenAuth
-        with self.assertRaises(ValueError) as ctx:
-            APITokenAuth(email=None, api_token="token")
+        import os
+        clean_env = {k: v for k, v in os.environ.items() if k != "BITBUCKET_EMAIL"}
+        with patch.dict(os.environ, clean_env, clear=True):
+            with self.assertRaises(ValueError) as ctx:
+                APITokenAuth(email=None, api_token="token")
         self.assertIn("email", str(ctx.exception).lower())
 
     def test_raises_if_token_missing(self):
         from bitbucket_sdk.auth import APITokenAuth
-        with self.assertRaises(ValueError) as ctx:
-            APITokenAuth(email="me@example.com", api_token=None)
+        import os
+        clean_env = {k: v for k, v in os.environ.items() if k != "BITBUCKET_API_TOKEN"}
+        with patch.dict(os.environ, clean_env, clear=True):
+            with self.assertRaises(ValueError) as ctx:
+                APITokenAuth(email="me@example.com", api_token=None)
         self.assertIn("api token", str(ctx.exception).lower())
 
     def test_reads_credentials_from_env(self):
