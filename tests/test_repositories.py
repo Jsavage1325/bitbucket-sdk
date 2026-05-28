@@ -14,7 +14,6 @@ from unittest.mock import MagicMock
 
 from bitbucket_sdk.resources.repositories import RepositoriesResource
 from bitbucket_sdk.models import Repository, PagedList, SrcEntry
-from bitbucket_sdk.exceptions import NotFoundError
 
 
 def _make_resource():
@@ -161,7 +160,7 @@ class TestRepositoriesGetFile(unittest.TestCase):
         resource, http = _make_resource()
         http.get.return_value = {}  # no mainbranch field
 
-        with self.assertRaises(NotFoundError):
+        with self.assertRaises(ValueError):
             resource.get_file("ws", "repo", "README.md")
 
         http.get_raw.assert_not_called()

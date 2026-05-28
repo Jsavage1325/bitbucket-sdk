@@ -6,9 +6,12 @@ Methods (reads):
   list_all(workspace, repo, ref=None, status=None)            →  Iterator[Pipeline]
   get(workspace, repo, pipeline_uuid)                         →  Pipeline
   list_steps(workspace, repo, pipeline_uuid)                  →  PagedList[PipelineStep]
+  list_all_steps(workspace, repo, pipeline_uuid)              →  Iterator[PipelineStep]
   get_step_log(workspace, repo, pipeline_uuid, step_uuid,
                tail_lines=None)                                →  str
   list_test_cases(workspace, repo, pipeline_uuid, step_uuid)  →  PagedList[TestCase]
+  list_all_test_cases(workspace, repo, pipeline_uuid,
+                      step_uuid)                               →  Iterator[TestCase]
 
 Methods (pipeline variables — repo-level env vars):
   list_variables(workspace, repo)                             →  list[PipelineVariable]
@@ -23,6 +26,7 @@ from typing import Iterator, List, Optional
 from .._http import HTTPClient
 from ..exceptions import NotFoundError
 from ..models import PagedList, Pipeline, PipelineStep, PipelineVariable, TestCase
+from ._utils import _require
 
 
 class PipelinesResource:
@@ -124,15 +128,25 @@ class PipelinesResource:
         data = self._http.get(
             f"/repositories/{workspace}/{repo}/pipelines/{pipeline_uuid}/steps/"
         )
-        steps = [PipelineStep.from_dict(s) for s in data.get("values", [])]
-        return PagedList(
-            values=steps,
-            size=data.get("size", 0),
-            page=data.get("page", 1),
-            pagelen=data.get("pagelen", 0),
-            next=data.get("next"),
-            previous=data.get("previous"),
-        )
+        return _parse_step_page(data)
+
+    # ------------------------------------------------------------------
+    # list_all_steps — auto-paginating generator
+    # ------------------------------------------------------------------
+
+    def list_all_steps(
+        self,
+        workspace: str,
+        repo: str,
+        pipeline_uuid: str,
+    ) -> Iterator[PipelineStep]:
+        """Yield every step for a pipeline run, across all pages."""
+        page = self.list_steps(workspace, repo, pipeline_uuid)
+        yield from page.values
+        while page.next:
+            data = self._http.get_next_page(page.next)
+            page = _parse_step_page(data)
+            yield from page.values
 
     # ------------------------------------------------------------------
     # get_step_log — raw log output, optionally tail-sliced
@@ -192,16 +206,26 @@ class PipelinesResource:
             f"/repositories/{workspace}/{repo}/pipelines/{pipeline_uuid}"
             f"/steps/{step_uuid}/test_reports/test_cases/"
         )
-        cases = [TestCase.from_dict(c) for c in data.get("values", [])]
-        return PagedList(
-            values=cases,
-            size=data.get("size", 0),
-            page=data.get("page", 1),
-            pagelen=data.get("pagelen", 0),
-            next=data.get("next"),
-            previous=data.get("previous"),
-        )
+        return _parse_test_case_page(data)
 
+    # ------------------------------------------------------------------
+    # list_all_test_cases — auto-paginating generator
+    # ------------------------------------------------------------------
+
+    def list_all_test_cases(
+        self,
+        workspace: str,
+        repo: str,
+        pipeline_uuid: str,
+        step_uuid: str,
+    ) -> Iterator[TestCase]:
+        """Yield every test case result for a step, across all pages."""
+        page = self.list_test_cases(workspace, repo, pipeline_uuid, step_uuid)
+        yield from page.values
+        while page.next:
+            data = self._http.get_next_page(page.next)
+            page = _parse_test_case_page(data)
+            yield from page.values
 
     # ------------------------------------------------------------------
     # list_variables — repo-level pipeline env vars, auto-paginated
@@ -217,22 +241,13 @@ class PipelinesResource:
         """
         _require("workspace", workspace)
         _require("repo", repo)
-        results: List[PipelineVariable] = []
-        path: Optional[str] = (
-            f"/repositories/{workspace}/{repo}/pipelines_config/variables/"
-        )
-        params: Optional[dict] = {"pagelen": 100}
-        while path:
-            if params is None:
-                # Subsequent pages: path is a full URL from the previous response's next
-                data = self._http.get_next_page(path)
-            else:
-                data = self._http.get(path, params=params)
-                params = None  # only the first page carries query params
-            results.extend(
-                PipelineVariable.from_dict(v) for v in data.get("values", [])
-            )
-            path = data.get("next")
+        path = f"/repositories/{workspace}/{repo}/pipelines_config/variables/"
+        page = _parse_variable_page(self._http.get(path, params={"pagelen": 100}))
+        results = list(page.values)
+        while page.next:
+            data = self._http.get_next_page(page.next)
+            page = _parse_variable_page(data)
+            results.extend(page.values)
         return results
 
     # ------------------------------------------------------------------
@@ -254,6 +269,11 @@ class PipelinesResource:
         exists, PUTs to the existing UUID otherwise. The value of a secured
         variable cannot be read back after it is set — only its key and
         ``secured=True`` will be returned by subsequent list_variables calls.
+
+        Note: the lookup and write are not atomic — concurrent callers setting
+        the same key for the first time may both POST, creating duplicate
+        variables. This is a limitation of the Bitbucket API (no upsert
+        endpoint). In practice this race is benign for typical CI use.
 
         Args:
             workspace: Bitbucket workspace slug.
@@ -286,7 +306,10 @@ class PipelinesResource:
         """
         Delete a repo-level pipeline variable by key.
 
-        Raises NotFoundError if no variable with that key exists.
+        Raises NotFoundError if no variable with that key exists. Note: the
+        lookup and delete are not atomic — if another caller deletes the same
+        variable concurrently, the second caller will also see NotFoundError
+        even if the variable existed at call time.
         """
         _require("workspace", workspace)
         _require("repo", repo)
@@ -321,11 +344,37 @@ def _parse_pipeline_page(data: dict) -> PagedList[Pipeline]:
     )
 
 
-# ---------------------------------------------------------------------------
-# Validation
-# ---------------------------------------------------------------------------
+def _parse_step_page(data: dict) -> PagedList[PipelineStep]:
+    steps = [PipelineStep.from_dict(s) for s in data.get("values", [])]
+    return PagedList(
+        values=steps,
+        size=data.get("size", 0),
+        page=data.get("page", 1),
+        pagelen=data.get("pagelen", 0),
+        next=data.get("next"),
+        previous=data.get("previous"),
+    )
 
 
-def _require(name: str, value: str) -> None:
-    if not value or not str(value).strip():
-        raise ValueError(f"'{name}' must not be empty")
+def _parse_test_case_page(data: dict) -> PagedList[TestCase]:
+    cases = [TestCase.from_dict(c) for c in data.get("values", [])]
+    return PagedList(
+        values=cases,
+        size=data.get("size", 0),
+        page=data.get("page", 1),
+        pagelen=data.get("pagelen", 0),
+        next=data.get("next"),
+        previous=data.get("previous"),
+    )
+
+
+def _parse_variable_page(data: dict) -> PagedList[PipelineVariable]:
+    variables = [PipelineVariable.from_dict(v) for v in data.get("values", [])]
+    return PagedList(
+        values=variables,
+        size=data.get("size", 0),
+        page=data.get("page", 1),
+        pagelen=data.get("pagelen", 0),
+        next=data.get("next"),
+        previous=data.get("previous"),
+    )

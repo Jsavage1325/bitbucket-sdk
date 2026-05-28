@@ -29,6 +29,7 @@ from typing import Iterator, List, Optional
 from .._http import HTTPClient
 from ..exceptions import NotFoundError
 from ..models import Comment, DiffStat, PagedList, PullRequest
+from ._utils import _require
 
 
 class PullRequestsResource:
@@ -545,11 +546,3 @@ def _parse_comment_page(data: dict) -> PagedList[Comment]:
     )
 
 
-# ---------------------------------------------------------------------------
-# Validation
-# ---------------------------------------------------------------------------
-
-
-def _require(name: str, value: str) -> None:
-    if not value or not str(value).strip():
-        raise ValueError(f"'{name}' must not be empty")

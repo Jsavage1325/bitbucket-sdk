@@ -228,6 +228,53 @@ class TestPipelinesListSteps(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# list_all_steps
+# ---------------------------------------------------------------------------
+
+
+class TestPipelinesListAllSteps(unittest.TestCase):
+
+    def test_list_all_steps_single_page(self):
+        resource, http = _make_resource()
+        http.get.return_value = {
+            "values": [_STEP_DATA],
+            "size": 1,
+            "page": 1,
+            "pagelen": 100,
+        }
+
+        result = list(resource.list_all_steps("ws", "repo", "{p1}"))
+
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], PipelineStep)
+        self.assertEqual(result[0].name, "Build")
+
+    def test_list_all_steps_follows_next_page(self):
+        _step2 = {**_STEP_DATA, "uuid": "{s2}", "name": "Test"}
+        resource, http = _make_resource()
+        http.get.return_value = {
+            "values": [_STEP_DATA],
+            "size": 2,
+            "page": 1,
+            "pagelen": 100,
+            "next": "https://api.bitbucket.org/2.0/repositories/ws/repo/pipelines/{p1}/steps/?page=2",
+        }
+        http.get_next_page.return_value = {
+            "values": [_step2],
+            "size": 2,
+            "page": 2,
+            "pagelen": 100,
+        }
+
+        result = list(resource.list_all_steps("ws", "repo", "{p1}"))
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0].name, "Build")
+        self.assertEqual(result[1].name, "Test")
+        http.get_next_page.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
 # get_step_log
 # ---------------------------------------------------------------------------
 
@@ -305,6 +352,52 @@ class TestPipelinesListTestCases(unittest.TestCase):
         result = resource.list_test_cases("ws", "repo", "{p1}", "{s1}")
 
         self.assertEqual(len(result), 0)
+
+
+# ---------------------------------------------------------------------------
+# list_all_test_cases
+# ---------------------------------------------------------------------------
+
+
+class TestPipelinesListAllTestCases(unittest.TestCase):
+
+    def test_list_all_test_cases_single_page(self):
+        resource, http = _make_resource()
+        http.get.return_value = {
+            "values": [_TEST_CASE_DATA, _TEST_CASE_FAILED],
+            "size": 2,
+            "page": 1,
+            "pagelen": 100,
+        }
+
+        result = list(resource.list_all_test_cases("ws", "repo", "{p1}", "{s1}"))
+
+        self.assertEqual(len(result), 2)
+        self.assertIsInstance(result[0], TestCase)
+
+    def test_list_all_test_cases_follows_next_page(self):
+        _tc2 = {**_TEST_CASE_DATA, "name": "test_baz"}
+        resource, http = _make_resource()
+        http.get.return_value = {
+            "values": [_TEST_CASE_DATA],
+            "size": 2,
+            "page": 1,
+            "pagelen": 100,
+            "next": "https://api.bitbucket.org/2.0/repositories/ws/repo/pipelines/{p1}/steps/{s1}/test_reports/test_cases/?page=2",
+        }
+        http.get_next_page.return_value = {
+            "values": [_tc2],
+            "size": 2,
+            "page": 2,
+            "pagelen": 100,
+        }
+
+        result = list(resource.list_all_test_cases("ws", "repo", "{p1}", "{s1}"))
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0].name, "test_foo")
+        self.assertEqual(result[1].name, "test_baz")
+        http.get_next_page.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

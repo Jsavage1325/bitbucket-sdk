@@ -14,8 +14,8 @@ from __future__ import annotations
 from typing import Iterator, Optional
 
 from .._http import HTTPClient
-from ..exceptions import NotFoundError
 from ..models import PagedList, Repository, SrcEntry
+from ._utils import _require
 
 
 class RepositoriesResource:
@@ -199,7 +199,7 @@ class RepositoriesResource:
         data = self._http.get(f"/repositories/{workspace}/{repo}")
         main = (data.get("mainbranch") or {}).get("name")
         if not main:
-            raise NotFoundError(
+            raise ValueError(
                 f"Could not determine default branch for {workspace}/{repo}"
             )
         return main
@@ -234,11 +234,3 @@ def _parse_src_page(data: dict) -> PagedList[SrcEntry]:
     )
 
 
-# ---------------------------------------------------------------------------
-# Validation
-# ---------------------------------------------------------------------------
-
-
-def _require(name: str, value: str) -> None:
-    if not value or not str(value).strip():
-        raise ValueError(f"'{name}' must not be empty")
